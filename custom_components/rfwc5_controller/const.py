@@ -55,4 +55,4 @@ LED_WRITE_DEBOUNCE_S = 1.0
 REFRESH_SETTLE_S = 0.5
 
 # Platforms we register
-PLATFORMS = ["switch"]
+PLATFORMS = ["switch", "sensor", "select", "text"]

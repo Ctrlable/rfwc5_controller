@@ -1,0 +1,118 @@
+"""
+Sensor platform for Eaton RFWC5 Z-Wave Keypad Controller.
+
+One sensor per button showing a human-readable summary of the button's
+current config:
+
+  "<label> → none"
+  "<label> → <action_type>: <action_entity>"
+
+The sensor re-renders automatically whenever the config entry is updated
+(e.g. after a select or text entity writes a new value).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.components.sensor import SensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .const import (
+    ACTION_TYPE_NONE,
+    CONF_BUTTONS,
+    CONF_BUTTON_ACTION_ENTITY,
+    CONF_BUTTON_ACTION_TYPE,
+    CONF_BUTTON_LABEL,
+    DOMAIN,
+    NUM_BUTTONS,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up one action-summary sensor per button."""
+    async_add_entities(
+        RFWC5ButtonActionSensor(entry=entry, button_index=i)
+        for i in range(NUM_BUTTONS)
+    )
+
+
+class RFWC5ButtonActionSensor(SensorEntity):
+    """Shows the current action config for one RFWC5 button."""
+
+    _attr_should_poll = False
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:information-outline"
+
+    def __init__(self, entry: ConfigEntry, button_index: int) -> None:
+        self._entry = entry
+        self._index = button_index
+        n = button_index + 1
+        self._attr_unique_id = f"{entry.entry_id}_button_{n}_action"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def _config(self) -> dict[str, Any]:
+        """Always read from live entry data so reloads pick up changes."""
+        return self._entry.data[CONF_BUTTONS][self._index]
+
+    # ------------------------------------------------------------------
+    # Entity identity / grouping
+    # ------------------------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        label = self._config.get(CONF_BUTTON_LABEL, f"Button {self._index + 1}")
+        return f"{label} Action"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=self._entry.data.get("keypad_name", "RFWC5 Keypad"),
+            manufacturer="Eaton",
+            model="RFWC5",
+        )
+
+    # ------------------------------------------------------------------
+    # State
+    # ------------------------------------------------------------------
+
+    @property
+    def native_value(self) -> str:
+        cfg = self._config
+        label = cfg.get(CONF_BUTTON_LABEL, f"Button {self._index + 1}")
+        atype = cfg.get(CONF_BUTTON_ACTION_TYPE, ACTION_TYPE_NONE)
+        aentity = cfg.get(CONF_BUTTON_ACTION_ENTITY, "")
+        if atype == ACTION_TYPE_NONE:
+            return f"{label} → none"
+        return f"{label} → {atype}: {aentity}"
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def async_added_to_hass(self) -> None:
+        """Re-render whenever the config entry is updated externally."""
+        self.async_on_remove(
+            self._entry.add_update_listener(self._on_entry_updated)
+        )
+
+    async def _on_entry_updated(
+        self, hass: HomeAssistant, entry: ConfigEntry
+    ) -> None:
+        self._entry = entry
+        self.async_write_ha_state()
