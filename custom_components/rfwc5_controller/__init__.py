@@ -103,11 +103,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if atype not in (ACTION_TYPE_NONE, ACTION_TYPE_HA_SCENE) and aentity:
             tracked_entities.append(aentity)
 
+    _LOGGER.warning("RFWC5 %s tracking entities: %s", entry.entry_id, tracked_entities)
+
     if tracked_entities:
         @callback
         def _on_linked_entity_state_change(event: Event) -> None:
             """Sync LED when a linked entity changes state externally."""
             changed_entity = event.data.get("entity_id")
+            _LOGGER.warning(
+                "RFWC5 state change detected: entity=%s new_state=%s",
+                changed_entity,
+                event.data.get("new_state").state if event.data.get("new_state") else "None",
+            )
             for btn_idx, cfg in enumerate(buttons_cfg):
                 if cfg.get(CONF_BUTTON_ACTION_ENTITY) == changed_entity:
                     new_state = event.data.get("new_state")

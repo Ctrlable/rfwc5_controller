@@ -189,6 +189,12 @@ class RFWC5LedManager:
         """Encode current LED state and send set_value to the device."""
         async with self._write_lock:
             target_value = self._encode(self._leds)
+            _LOGGER.warning(
+                "RFWC5 %s write triggered: leds=%s value=%d",
+                self.device_id,
+                self._leds,
+                target_value,
+            )
             _LOGGER.debug(
                 "RFWC5 %s writing indicator value %d (LEDs %s)",
                 self.device_id,
