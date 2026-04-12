@@ -1,0 +1,43 @@
+sync_leds:
+  name: Sync LEDs
+  description: >
+    Force-sync all RFWC5 keypad LED states to match current HA state.
+    Useful after a Home Assistant restart or Z-Wave network reset.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Config entry ID of the keypad to sync. Omit to sync all keypads.
+      required: false
+      example: "abc123def456"
+      selector:
+        text:
+
+set_button_led:
+  name: Set Button LED
+  description: >
+    Directly control the LED state of a specific button on an RFWC5 keypad.
+    The change is debounced and written to the Z-Wave device.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Config entry ID of the target keypad.
+      required: true
+      example: "abc123def456"
+      selector:
+        text:
+    button:
+      name: Button Number
+      description: The button number to control (1–5).
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    state:
+      name: State
+      description: "True = LED on, False = LED off."
+      required: true
+      selector:
+        boolean:

@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add RFWC5 Keypad",
+        "description": "Select your Eaton RFWC5 Z-Wave keypad and its Indicator sensor entity.",
+        "data": {
+          "device_id": "Z-Wave Device",
+          "indicator_entity": "Indicator Sensor / Number Entity",
+          "keypad_name": "Keypad Name"
+        }
+      },
+      "button": {
+        "title": "Configure Button {button_number}",
+        "description": "Set the label and what action this button controls.",
+        "data": {
+          "label": "Button Label",
+          "action_type": "Action Type",
+          "action_entity": "Target Entity (entity_id)"
+        }
+      }
+    },
+    "abort": {
+      "no_zwave_devices": "No Z-Wave JS devices found. Ensure Z-Wave JS is set up.",
+      "already_configured": "This keypad has already been configured."
+    },
+    "error": {
+      "invalid_entity": "The selected entity does not belong to the chosen Z-Wave device."
+    }
+  },
+  "options": {
+    "step": {
+      "button": {
+        "title": "Reconfigure Button {button_number}",
+        "data": {
+          "label": "Button Label",
+          "action_type": "Action Type",
+          "action_entity": "Target Entity (entity_id)"
+        }
+      }
+    }
+  }
+}
