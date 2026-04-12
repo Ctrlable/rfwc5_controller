@@ -32,7 +32,6 @@ from .const import (
     REFRESH_SETTLE_S,
     ZWAVE_INDICATOR_CC,
     ZWAVE_INDICATOR_PROPERTY,
-    ZWAVE_INDICATOR_PROPERTY_KEY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -210,10 +209,9 @@ class RFWC5LedManager:
                     "zwave_js",
                     "set_value",
                     {
-                        "device_id": self.device_id,
+                        "entity_id": self._indicator_entity_id(),
                         "command_class": ZWAVE_INDICATOR_CC,
                         "property": ZWAVE_INDICATOR_PROPERTY,
-                        "property_key": ZWAVE_INDICATOR_PROPERTY_KEY,
                         "value": target_value,
                     },
                     blocking=True,

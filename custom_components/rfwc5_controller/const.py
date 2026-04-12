@@ -14,7 +14,6 @@ INDICATOR_ALL_OFF_VALUE = 32
 # Z-Wave Indicator CC value property
 ZWAVE_INDICATOR_CC = 135
 ZWAVE_INDICATOR_PROPERTY = "value"
-ZWAVE_INDICATOR_PROPERTY_KEY = 0
 
 # Config entry keys
 CONF_NODE_ID = "node_id"
