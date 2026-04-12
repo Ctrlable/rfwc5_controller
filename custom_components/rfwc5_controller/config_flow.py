@@ -12,7 +12,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er, device_registry as dr
 
 from .const import (
+    ACTION_TYPE_AUTOMATION,
+    ACTION_TYPE_HA_SCENE,
     ACTION_TYPE_NONE,
+    ACTION_TYPE_SCRIPT,
+    ACTION_TYPE_STATEFUL_SCENE,
+    ACTION_TYPE_TOGGLE,
     ACTION_TYPES,
     CONF_BUTTON_ACTION_ENTITY,
     CONF_BUTTON_ACTION_TYPE,
@@ -25,6 +30,18 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Domains to search for each action type when building entity pickers
+_ACTION_TYPE_DOMAINS: dict[str, list[str]] = {
+    ACTION_TYPE_STATEFUL_SCENE: ["switch"],
+    ACTION_TYPE_HA_SCENE: ["scene"],
+    ACTION_TYPE_AUTOMATION: ["automation"],
+    ACTION_TYPE_SCRIPT: ["script"],
+    ACTION_TYPE_TOGGLE: [
+        "switch", "light", "input_boolean", "fan",
+        "cover", "climate", "media_player", "lock",
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,6 +70,19 @@ def _get_indicator_entities(hass: HomeAssistant, device_id: str) -> dict[str, st
     return result
 
 
+def _get_entities_for_action_type(
+    hass: HomeAssistant, action_type: str
+) -> dict[str, str]:
+    """Return {entity_id: friendly_name} for states whose domain matches the action type."""
+    domains = _ACTION_TYPE_DOMAINS.get(action_type, [])
+    result: dict[str, str] = {}
+    for state in hass.states.async_all():
+        if state.domain in domains:
+            friendly = state.attributes.get("friendly_name", state.entity_id)
+            result[state.entity_id] = f"{friendly} ({state.entity_id})"
+    return result
+
+
 def _default_button_config(index: int) -> dict[str, Any]:
     return {
         CONF_BUTTON_LABEL: f"Button {index + 1}",
@@ -68,16 +98,17 @@ def _default_button_config(index: int) -> dict[str, Any]:
 class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """
     Multi-step config flow:
-      Step 1 – user:       Pick Z-Wave device + keypad name
-      Step 2 – indicator:  Pick indicator entity (scoped to the selected device)
-      Step 3 – buttons:    Configure each button (label, action type, entity)
+      Step 1 – user:      Pick Z-Wave device + keypad name
+      Step 2 – indicator: Pick indicator entity (scoped to selected device)
+      Step 3 – buttons:   Set labels + action types for all 5 buttons at once
+      Step 4 – entities:  Entity pickers, shown only for non-"none" buttons,
+                          filtered to the correct domain per action type
     """
 
     VERSION = 1
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
-        self._current_button = 0
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -120,8 +151,7 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._data[CONF_BUTTONS] = [
                 _default_button_config(i) for i in range(NUM_BUTTONS)
             ]
-            self._current_button = 0
-            return await self.async_step_button()
+            return await self.async_step_buttons()
 
         zwave_devices = _get_zwave_devices(self.hass)
         device_name = zwave_devices.get(device_id, device_id)
@@ -138,47 +168,66 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"device_name": device_name},
         )
 
-    async def async_step_button(
+    async def async_step_buttons(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 3 (repeated for each button): Configure label, action type and entity."""
-        errors: dict[str, str] = {}
-        idx = self._current_button
-
+        """Step 3: Configure labels and action types for all 5 buttons at once."""
         if user_input is not None:
-            self._data[CONF_BUTTONS][idx] = {
-                CONF_BUTTON_LABEL: user_input[CONF_BUTTON_LABEL],
-                CONF_BUTTON_ACTION_TYPE: user_input[CONF_BUTTON_ACTION_TYPE],
-                CONF_BUTTON_ACTION_ENTITY: user_input.get(CONF_BUTTON_ACTION_ENTITY, ""),
-            }
-            self._current_button += 1
-            if self._current_button < NUM_BUTTONS:
-                return await self.async_step_button()
+            for i in range(NUM_BUTTONS):
+                n = i + 1
+                self._data[CONF_BUTTONS][i] = {
+                    CONF_BUTTON_LABEL: user_input[f"button_{n}_label"],
+                    CONF_BUTTON_ACTION_TYPE: user_input[f"button_{n}_action_type"],
+                    CONF_BUTTON_ACTION_ENTITY: "",
+                }
+            return await self.async_step_entities()
 
-            title = self._data.get("keypad_name", "RFWC5 Keypad")
-            return self.async_create_entry(title=title, data=self._data)
-
-        defaults = self._data[CONF_BUTTONS][idx]
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_BUTTON_LABEL, default=defaults[CONF_BUTTON_LABEL]): str,
-                vol.Required(
-                    CONF_BUTTON_ACTION_TYPE,
-                    default=defaults[CONF_BUTTON_ACTION_TYPE],
-                ): vol.In(ACTION_TYPES),
-                vol.Optional(
-                    CONF_BUTTON_ACTION_ENTITY,
-                    default=defaults[CONF_BUTTON_ACTION_ENTITY],
-                ): str,
-            }
-        )
+        schema_dict: dict = {}
+        for i in range(NUM_BUTTONS):
+            n = i + 1
+            defaults = self._data[CONF_BUTTONS][i]
+            schema_dict[vol.Required(f"button_{n}_label", default=defaults[CONF_BUTTON_LABEL])] = str
+            schema_dict[vol.Required(f"button_{n}_action_type", default=defaults[CONF_BUTTON_ACTION_TYPE])] = vol.In(ACTION_TYPES)
 
         return self.async_show_form(
-            step_id="button",
-            data_schema=schema,
-            errors=errors,
-            description_placeholders={"button_number": str(idx + 1)},
+            step_id="buttons",
+            data_schema=vol.Schema(schema_dict),
+        )
+
+    async def async_step_entities(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Step 4: Entity pickers for buttons that need one, filtered by domain."""
+        active = [
+            i for i in range(NUM_BUTTONS)
+            if self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE] != ACTION_TYPE_NONE
+        ]
+
+        title = self._data.get("keypad_name", "RFWC5 Keypad")
+
+        if not active:
+            return self.async_create_entry(title=title, data=self._data)
+
+        if user_input is not None:
+            for i in active:
+                n = i + 1
+                self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_ENTITY] = (
+                    user_input.get(f"button_{n}_entity", "")
+                )
+            return self.async_create_entry(title=title, data=self._data)
+
+        schema_dict = {}
+        for i in active:
+            n = i + 1
+            action_type = self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE]
+            entities = _get_entities_for_action_type(self.hass, action_type)
+            current = self._data[CONF_BUTTONS][i].get(CONF_BUTTON_ACTION_ENTITY, "")
+            field = vol.Optional(f"button_{n}_entity", default=current)
+            schema_dict[field] = vol.In(entities) if entities else str
+
+        return self.async_show_form(
+            step_id="entities",
+            data_schema=vol.Schema(schema_dict),
         )
 
     @staticmethod
@@ -190,7 +239,7 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 # ---------------------------------------------------------------------------
-# Options Flow (reconfigure device, indicator, and buttons)
+# Options Flow (reconfigure device, indicator, buttons, and entities)
 # ---------------------------------------------------------------------------
 
 class RFWC5OptionsFlow(config_entries.OptionsFlow):
@@ -199,13 +248,11 @@ class RFWC5OptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._entry = config_entry
         self._data: dict[str, Any] = dict(config_entry.data)
-        self._current_button = 0
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Entry point — start with device selection."""
-        self._current_button = 0
         return await self.async_step_device()
 
     async def async_step_device(
@@ -246,13 +293,11 @@ class RFWC5OptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             self._data[CONF_ENTITY_ID] = user_input[CONF_ENTITY_ID]
-            self._current_button = 0
-            return await self.async_step_button()
+            return await self.async_step_buttons()
 
         zwave_devices = _get_zwave_devices(self.hass)
         device_name = zwave_devices.get(device_id, device_id)
 
-        # Pre-select current entity if it still exists for this device
         current = self._data.get(CONF_ENTITY_ID, "")
         default_entity = current if current in indicator_entities else next(iter(indicator_entities))
 
@@ -268,43 +313,62 @@ class RFWC5OptionsFlow(config_entries.OptionsFlow):
             description_placeholders={"device_name": device_name},
         )
 
-    async def async_step_button(
+    async def async_step_buttons(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 3 (repeated for each button): Configure label, action type and entity."""
-        idx = self._current_button
-        errors: dict[str, str] = {}
-
+        """Step 3: Configure labels and action types for all 5 buttons at once."""
         if user_input is not None:
-            self._data[CONF_BUTTONS][idx] = {
-                CONF_BUTTON_LABEL: user_input[CONF_BUTTON_LABEL],
-                CONF_BUTTON_ACTION_TYPE: user_input[CONF_BUTTON_ACTION_TYPE],
-                CONF_BUTTON_ACTION_ENTITY: user_input.get(CONF_BUTTON_ACTION_ENTITY, ""),
-            }
-            self._current_button += 1
-            if self._current_button < NUM_BUTTONS:
-                return await self.async_step_button()
+            for i in range(NUM_BUTTONS):
+                n = i + 1
+                self._data[CONF_BUTTONS][i] = {
+                    CONF_BUTTON_LABEL: user_input[f"button_{n}_label"],
+                    CONF_BUTTON_ACTION_TYPE: user_input[f"button_{n}_action_type"],
+                    CONF_BUTTON_ACTION_ENTITY: "",
+                }
+            return await self.async_step_entities()
 
-            return self.async_create_entry(title="", data=self._data)
-
-        defaults = self._data[CONF_BUTTONS][idx]
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_BUTTON_LABEL, default=defaults[CONF_BUTTON_LABEL]): str,
-                vol.Required(
-                    CONF_BUTTON_ACTION_TYPE,
-                    default=defaults[CONF_BUTTON_ACTION_TYPE],
-                ): vol.In(ACTION_TYPES),
-                vol.Optional(
-                    CONF_BUTTON_ACTION_ENTITY,
-                    default=defaults.get(CONF_BUTTON_ACTION_ENTITY, ""),
-                ): str,
-            }
-        )
+        schema_dict: dict = {}
+        for i in range(NUM_BUTTONS):
+            n = i + 1
+            defaults = self._data[CONF_BUTTONS][i]
+            schema_dict[vol.Required(f"button_{n}_label", default=defaults[CONF_BUTTON_LABEL])] = str
+            schema_dict[vol.Required(f"button_{n}_action_type", default=defaults[CONF_BUTTON_ACTION_TYPE])] = vol.In(ACTION_TYPES)
 
         return self.async_show_form(
-            step_id="button",
-            data_schema=schema,
-            errors=errors,
-            description_placeholders={"button_number": str(idx + 1)},
+            step_id="buttons",
+            data_schema=vol.Schema(schema_dict),
+        )
+
+    async def async_step_entities(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Step 4: Entity pickers for buttons that need one, filtered by domain."""
+        active = [
+            i for i in range(NUM_BUTTONS)
+            if self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE] != ACTION_TYPE_NONE
+        ]
+
+        if not active:
+            return self.async_create_entry(title="", data=self._data)
+
+        if user_input is not None:
+            for i in active:
+                n = i + 1
+                self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_ENTITY] = (
+                    user_input.get(f"button_{n}_entity", "")
+                )
+            return self.async_create_entry(title="", data=self._data)
+
+        schema_dict = {}
+        for i in active:
+            n = i + 1
+            action_type = self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE]
+            entities = _get_entities_for_action_type(self.hass, action_type)
+            current = self._data[CONF_BUTTONS][i].get(CONF_BUTTON_ACTION_ENTITY, "")
+            field = vol.Optional(f"button_{n}_entity", default=current)
+            schema_dict[field] = vol.In(entities) if entities else str
+
+        return self.async_show_form(
+            step_id="entities",
+            data_schema=vol.Schema(schema_dict),
         )

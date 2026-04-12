@@ -16,13 +16,31 @@
           "indicator_entity": "Indicator Sensor / Number Entity"
         }
       },
-      "button": {
-        "title": "Configure Button {button_number}",
-        "description": "Set the label and what action this button controls.",
+      "buttons": {
+        "title": "Configure All Buttons",
+        "description": "Set labels and action types for all 5 buttons.",
         "data": {
-          "label": "Button Label",
-          "action_type": "Action Type",
-          "action_entity": "Target Entity (entity_id)"
+          "button_1_label": "Button 1 Label",
+          "button_1_action_type": "Button 1 Action Type",
+          "button_2_label": "Button 2 Label",
+          "button_2_action_type": "Button 2 Action Type",
+          "button_3_label": "Button 3 Label",
+          "button_3_action_type": "Button 3 Action Type",
+          "button_4_label": "Button 4 Label",
+          "button_4_action_type": "Button 4 Action Type",
+          "button_5_label": "Button 5 Label",
+          "button_5_action_type": "Button 5 Action Type"
+        }
+      },
+      "entities": {
+        "title": "Assign Entities",
+        "description": "Select the target entity for each active button.",
+        "data": {
+          "button_1_entity": "Button 1 Entity",
+          "button_2_entity": "Button 2 Entity",
+          "button_3_entity": "Button 3 Entity",
+          "button_4_entity": "Button 4 Entity",
+          "button_5_entity": "Button 5 Entity"
         }
       }
     },
@@ -47,13 +65,31 @@
           "indicator_entity": "Indicator Sensor / Number Entity"
         }
       },
-      "button": {
-        "title": "Reconfigure Button {button_number}",
-        "description": "Update the label and action for button {button_number}.",
+      "buttons": {
+        "title": "Configure All Buttons",
+        "description": "Set labels and action types for all 5 buttons.",
         "data": {
-          "label": "Button Label",
-          "action_type": "Action Type",
-          "action_entity": "Target Entity (entity_id)"
+          "button_1_label": "Button 1 Label",
+          "button_1_action_type": "Button 1 Action Type",
+          "button_2_label": "Button 2 Label",
+          "button_2_action_type": "Button 2 Action Type",
+          "button_3_label": "Button 3 Label",
+          "button_3_action_type": "Button 3 Action Type",
+          "button_4_label": "Button 4 Label",
+          "button_4_action_type": "Button 4 Action Type",
+          "button_5_label": "Button 5 Label",
+          "button_5_action_type": "Button 5 Action Type"
+        }
+      },
+      "entities": {
+        "title": "Assign Entities",
+        "description": "Select the target entity for each active button.",
+        "data": {
+          "button_1_entity": "Button 1 Entity",
+          "button_2_entity": "Button 2 Entity",
+          "button_3_entity": "Button 3 Entity",
+          "button_4_entity": "Button 4 Entity",
+          "button_5_entity": "Button 5 Entity"
         }
       }
     }
