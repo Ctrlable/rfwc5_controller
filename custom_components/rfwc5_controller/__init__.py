@@ -110,16 +110,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         def _on_linked_entity_state_change(event: Event) -> None:
             """Sync LED when a linked entity changes state externally."""
             changed_entity = event.data.get("entity_id")
-            _LOGGER.warning(
-                "RFWC5 state change detected: entity=%s new_state=%s",
-                changed_entity,
-                event.data.get("new_state").state if event.data.get("new_state") else "None",
-            )
             for btn_idx, cfg in enumerate(buttons_cfg):
                 if cfg.get(CONF_BUTTON_ACTION_ENTITY) == changed_entity:
                     new_state = event.data.get("new_state")
                     if new_state is not None:
                         is_on = new_state.state == STATE_ON
+                        _LOGGER.warning(
+                            "RFWC5 linked entity changed: entity=%s state=%s button=%d",
+                            changed_entity, is_on, btn_idx,
+                        )
                         # Update manager state without triggering another write immediately
                         # (use internal attribute directly to avoid extra debounce)
                         manager._leds[btn_idx] = is_on
