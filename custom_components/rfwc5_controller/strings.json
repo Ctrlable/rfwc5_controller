@@ -3,11 +3,17 @@
     "step": {
       "user": {
         "title": "Add RFWC5 Keypad",
-        "description": "Select your Eaton RFWC5 Z-Wave keypad and its Indicator sensor entity.",
+        "description": "Found {device_count} Z-Wave device(s). Select the device for your RFWC5 keypad.",
         "data": {
           "device_id": "Z-Wave Device",
-          "indicator_entity": "Indicator Sensor / Number Entity",
           "keypad_name": "Keypad Name"
+        }
+      },
+      "indicator": {
+        "title": "Select Indicator Entity",
+        "description": "Select the indicator sensor or number entity for {device_name}.",
+        "data": {
+          "indicator_entity": "Indicator Sensor / Number Entity"
         }
       },
       "button": {
@@ -22,16 +28,28 @@
     },
     "abort": {
       "no_zwave_devices": "No Z-Wave JS devices found. Ensure Z-Wave JS is set up.",
+      "no_indicator_entities": "No sensor or number entities found on the selected device.",
       "already_configured": "This keypad has already been configured."
-    },
-    "error": {
-      "invalid_entity": "The selected entity does not belong to the chosen Z-Wave device."
     }
   },
   "options": {
     "step": {
+      "device": {
+        "title": "Select Z-Wave Device",
+        "data": {
+          "device_id": "Z-Wave Device"
+        }
+      },
+      "indicator": {
+        "title": "Select Indicator Entity",
+        "description": "Select the indicator sensor or number entity for {device_name}.",
+        "data": {
+          "indicator_entity": "Indicator Sensor / Number Entity"
+        }
+      },
       "button": {
         "title": "Reconfigure Button {button_number}",
+        "description": "Update the label and action for button {button_number}.",
         "data": {
           "label": "Button Label",
           "action_type": "Action Type",
