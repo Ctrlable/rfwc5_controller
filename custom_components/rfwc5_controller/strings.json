@@ -16,6 +16,18 @@
           "indicator_entity": "Indicator Sensor / Number Entity"
         }
       },
+      "mqtt": {
+        "title": "Z-Wave JS UI MQTT Settings",
+        "description": "Configure MQTT connection to your Z-Wave JS UI instance. The Node ID for your RFWC5 can be found in the Z-Wave JS UI control panel under your device details.",
+        "data": {
+          "mqtt_prefix": "MQTT Prefix",
+          "mqtt_gateway": "Gateway Name",
+          "mqtt_host": "MQTT Broker Host",
+          "mqtt_port": "MQTT Broker Port",
+          "node_id": "RFWC5 Node ID",
+          "controller_node_id": "Controller Node ID"
+        }
+      },
       "buttons": {
         "title": "Configure All Buttons",
         "description": "Set labels and action types for all 5 buttons.",
@@ -63,6 +75,18 @@
         "description": "Select the indicator sensor or number entity for {device_name}.",
         "data": {
           "indicator_entity": "Indicator Sensor / Number Entity"
+        }
+      },
+      "mqtt": {
+        "title": "Z-Wave JS UI MQTT Settings",
+        "description": "Configure MQTT connection to your Z-Wave JS UI instance. The Node ID for your RFWC5 can be found in the Z-Wave JS UI control panel under your device details.",
+        "data": {
+          "mqtt_prefix": "MQTT Prefix",
+          "mqtt_gateway": "Gateway Name",
+          "mqtt_host": "MQTT Broker Host",
+          "mqtt_port": "MQTT Broker Port",
+          "node_id": "RFWC5 Node ID",
+          "controller_node_id": "Controller Node ID"
         }
       },
       "buttons": {

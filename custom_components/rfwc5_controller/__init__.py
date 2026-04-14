@@ -48,7 +48,7 @@ from .const import (
     SERVICE_SYNC_LEDS,
 )
 from .led_manager import RFWC5LedManager
-from .provisioner import RFWC5Provisioner
+from .provisioner import MQTTProvisioner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,23 +73,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id]["manager"] = manager
 
     # ---------------------------------------------------------------
-    # Provision Z-Wave associations and group levels before first use
+    # Provision Z-Wave associations and group levels (first setup only)
     # ---------------------------------------------------------------
-    provisioner = RFWC5Provisioner(hass, device_id, entry.entry_id)
-    report = await provisioner.async_provision()
+    if not entry.data.get("provisioned", False):
+        provisioner = MQTTProvisioner(hass, entry)
+        report = await provisioner.async_provision()
 
-    if not report["success"]:
-        _LOGGER.warning(
-            "RFWC5 %s provisioning incomplete: %s",
-            device_id, report,
+        if not report["success"]:
+            _LOGGER.warning(
+                "RFWC5 %s provisioning incomplete: %s",
+                device_id, report,
+            )
+        else:
+            _LOGGER.info(
+                "RFWC5 %s provisioning complete: %s",
+                device_id, report,
+            )
+
+        hass.data[DOMAIN][entry.entry_id]["provision_report"] = report
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, "provisioned": True, "provision_report": report},
         )
     else:
-        _LOGGER.info(
-            "RFWC5 %s provisioning complete: %s",
-            device_id, report,
+        _LOGGER.debug("RFWC5 %s already provisioned, skipping", device_id)
+        hass.data[DOMAIN][entry.entry_id]["provision_report"] = entry.data.get(
+            "provision_report", {}
         )
-
-    hass.data[DOMAIN][entry.entry_id]["provision_report"] = report
 
     # Initialise (refresh + read current indicator value)
     await manager.async_initialize()
@@ -244,14 +254,26 @@ def _register_services(hass: HomeAssistant) -> None:
     )
 
     async def _reprovision(call: Any) -> None:
-        """Re-run Z-Wave provisioning for one or all keypads."""
+        """Re-run Z-Wave MQTT provisioning for one or all keypads."""
         entry_id = call.data.get("entry_id")
         for eid, data in hass.data.get(DOMAIN, {}).items():
             if entry_id and eid != entry_id:
                 continue
-            prov = RFWC5Provisioner(hass, data["device_id"], eid)
+            cfg_entry = hass.config_entries.async_get_entry(eid)
+            if cfg_entry is None:
+                continue
+            # Mark as not provisioned so the sequence runs again
+            hass.config_entries.async_update_entry(
+                cfg_entry,
+                data={**cfg_entry.data, "provisioned": False},
+            )
+            prov = MQTTProvisioner(hass, cfg_entry)
             report = await prov.async_provision()
             data["provision_report"] = report
+            hass.config_entries.async_update_entry(
+                cfg_entry,
+                data={**cfg_entry.data, "provisioned": True, "provision_report": report},
+            )
             if not report["success"]:
                 _LOGGER.warning(
                     "RFWC5 %s reprovision incomplete: %s",

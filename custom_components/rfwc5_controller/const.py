@@ -30,9 +30,22 @@ PROVISION_WRITE_S = 1.0
 
 # Config entry keys
 CONF_NODE_ID = "node_id"
+CONF_CONTROLLER_NODE_ID = "controller_node_id"
 CONF_DEVICE_ID = "device_id"        # Z-Wave JS device_id (used for service calls)
 CONF_ENTITY_ID = "indicator_entity" # sensor/number entity that holds indicator value
 CONF_BUTTONS = "buttons"             # list of 5 button config dicts
+
+# MQTT config keys
+CONF_MQTT_PREFIX = "mqtt_prefix"
+CONF_MQTT_GATEWAY = "mqtt_gateway"
+CONF_MQTT_HOST = "mqtt_host"
+CONF_MQTT_PORT = "mqtt_port"
+
+# MQTT defaults
+DEFAULT_MQTT_PREFIX = "zwave-js-ui"
+DEFAULT_MQTT_GATEWAY = "zwave-js-ui"
+DEFAULT_MQTT_PORT = 1883
+DEFAULT_CONTROLLER_NODE_ID = 1
 
 # Per-button config keys
 CONF_BUTTON_LABEL = "label"
