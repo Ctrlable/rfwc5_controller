@@ -43,10 +43,12 @@ from .const import (
     DOMAIN,
     NUM_BUTTONS,
     PLATFORMS,
-    SERVICE_SYNC_LEDS,
+    SERVICE_REPROVISION,
     SERVICE_SET_BUTTON_LED,
+    SERVICE_SYNC_LEDS,
 )
 from .led_manager import RFWC5LedManager
+from .provisioner import RFWC5Provisioner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +71,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create and initialise the LED manager
     manager = RFWC5LedManager(hass, device_id, entry.entry_id)
     hass.data[DOMAIN][entry.entry_id]["manager"] = manager
+
+    # ---------------------------------------------------------------
+    # Provision Z-Wave associations and group levels before first use
+    # ---------------------------------------------------------------
+    provisioner = RFWC5Provisioner(hass, device_id, entry.entry_id)
+    report = await provisioner.async_provision()
+
+    if not report["success"]:
+        _LOGGER.warning(
+            "RFWC5 %s provisioning incomplete: %s",
+            device_id, report,
+        )
+    else:
+        _LOGGER.info(
+            "RFWC5 %s provisioning complete: %s",
+            device_id, report,
+        )
+
+    hass.data[DOMAIN][entry.entry_id]["provision_report"] = report
 
     # Initialise (refresh + read current indicator value)
     await manager.async_initialize()
@@ -220,4 +241,30 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_SET_BUTTON_LED,
         _set_button_led,
+    )
+
+    async def _reprovision(call: Any) -> None:
+        """Re-run Z-Wave provisioning for one or all keypads."""
+        entry_id = call.data.get("entry_id")
+        for eid, data in hass.data.get(DOMAIN, {}).items():
+            if entry_id and eid != entry_id:
+                continue
+            prov = RFWC5Provisioner(hass, data["device_id"], eid)
+            report = await prov.async_provision()
+            data["provision_report"] = report
+            if not report["success"]:
+                _LOGGER.warning(
+                    "RFWC5 %s reprovision incomplete: %s",
+                    data["device_id"], report,
+                )
+            else:
+                _LOGGER.info(
+                    "RFWC5 %s reprovision complete: %s",
+                    data["device_id"], report,
+                )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REPROVISION,
+        _reprovision,
     )

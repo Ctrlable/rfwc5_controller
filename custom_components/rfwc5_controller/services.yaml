@@ -12,6 +12,22 @@ sync_leds:
       selector:
         text:
 
+reprovision:
+  name: Reprovision Keypad
+  description: >
+    Re-run Z-Wave group association and level provisioning for a keypad.
+    Use this if button presses are not being detected correctly.
+    Sets groups 1-5 and 255 as association targets and configures
+    group level parameters 1-5 to values 10/20/30/40/50.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Config entry ID of the keypad to reprovision. Omit to reprovision all keypads.
+      required: false
+      example: "abc123def456"
+      selector:
+        text:
+
 set_button_led:
   name: Set Button LED
   description: >

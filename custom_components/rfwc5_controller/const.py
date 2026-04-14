@@ -15,6 +15,19 @@ INDICATOR_ALL_OFF_VALUE = 32
 ZWAVE_INDICATOR_CC = 135
 ZWAVE_INDICATOR_PROPERTY = "value"
 
+# Z-Wave Configuration CC (used for group level parameters)
+ZWAVE_CONFIG_CC = 112
+
+# Z-Wave Association groups to provision (buttons 1-5 + master lifeline)
+ZWAVE_ASSOCIATION_GROUP_IDS = [1, 2, 3, 4, 5, 255]
+
+# Default group level values (Basic CC value sent per button press)
+DEFAULT_GROUP_LEVELS = [10, 20, 30, 40, 50]
+
+# Provisioning timing constants (seconds)
+PROVISION_SETTLE_S = 0.5
+PROVISION_WRITE_S = 1.0
+
 # Config entry keys
 CONF_NODE_ID = "node_id"
 CONF_DEVICE_ID = "device_id"        # Z-Wave JS device_id (used for service calls)
@@ -46,6 +59,7 @@ ACTION_TYPES = [
 # Services exposed by this integration
 SERVICE_SYNC_LEDS = "sync_leds"
 SERVICE_SET_BUTTON_LED = "set_button_led"
+SERVICE_REPROVISION = "reprovision"
 
 # Debounce delay in seconds before writing to Z-Wave
 LED_WRITE_DEBOUNCE_S = 1.0

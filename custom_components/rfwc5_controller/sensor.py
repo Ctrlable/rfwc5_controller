@@ -40,11 +40,13 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up one action-summary sensor per button."""
-    async_add_entities(
+    """Set up one action-summary sensor per button plus a provisioning status sensor."""
+    entities: list[SensorEntity] = [
         RFWC5ButtonActionSensor(entry=entry, button_index=i)
         for i in range(NUM_BUTTONS)
-    )
+    ]
+    entities.append(RFWC5ProvisioningStatusSensor(hass=hass, entry=entry))
+    async_add_entities(entities)
 
 
 class RFWC5ButtonActionSensor(SensorEntity):
@@ -107,6 +109,64 @@ class RFWC5ButtonActionSensor(SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Re-render whenever the config entry is updated externally."""
+        self.async_on_remove(
+            self._entry.add_update_listener(self._on_entry_updated)
+        )
+
+    async def _on_entry_updated(
+        self, hass: HomeAssistant, entry: ConfigEntry
+    ) -> None:
+        self._entry = entry
+        self.async_write_ha_state()
+
+
+class RFWC5ProvisioningStatusSensor(SensorEntity):
+    """Shows the Z-Wave provisioning status for one RFWC5 keypad."""
+
+    _attr_should_poll = False
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:check-network"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_provisioning_status"
+
+    @property
+    def name(self) -> str:
+        return "Provisioning Status"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=self._entry.data.get("keypad_name", "RFWC5 Keypad"),
+            manufacturer="Eaton",
+            model="RFWC5",
+        )
+
+    @property
+    def native_value(self) -> str:
+        report = (
+            self.hass.data
+            .get(DOMAIN, {})
+            .get(self._entry.entry_id, {})
+            .get("provision_report")
+        )
+        if report is None:
+            return "unknown"
+        return "ok" if report.get("success") else "incomplete"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return (
+            self.hass.data
+            .get(DOMAIN, {})
+            .get(self._entry.entry_id, {})
+            .get("provision_report", {})
+        )
+
+    async def async_added_to_hass(self) -> None:
         self.async_on_remove(
             self._entry.add_update_listener(self._on_entry_updated)
         )
