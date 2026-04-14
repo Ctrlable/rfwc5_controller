@@ -38,8 +38,18 @@ from .const import (
     CONF_BUTTONS,
     CONF_BUTTON_ACTION_ENTITY,
     CONF_BUTTON_ACTION_TYPE,
+    CONF_CONTROLLER_NODE_ID,
     CONF_DEVICE_ID,
     CONF_ENTITY_ID,
+    CONF_MQTT_GATEWAY,
+    CONF_MQTT_HOST,
+    CONF_MQTT_PORT,
+    CONF_MQTT_PREFIX,
+    CONF_NODE_ID,
+    DEFAULT_CONTROLLER_NODE_ID,
+    DEFAULT_MQTT_GATEWAY,
+    DEFAULT_MQTT_PORT,
+    DEFAULT_MQTT_PREFIX,
     DOMAIN,
     NUM_BUTTONS,
     PLATFORMS,
@@ -51,6 +61,29 @@ from .led_manager import RFWC5LedManager
 from .provisioner import MQTTProvisioner
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old config entries to the current schema version."""
+    _LOGGER.info(
+        "Migrating RFWC5 entry from version %s", config_entry.version
+    )
+
+    if config_entry.version < 2:
+        new_data = {**config_entry.data}
+        new_data.setdefault(CONF_MQTT_PREFIX, DEFAULT_MQTT_PREFIX)
+        new_data.setdefault(CONF_MQTT_GATEWAY, DEFAULT_MQTT_GATEWAY)
+        new_data.setdefault(CONF_MQTT_HOST, "localhost")
+        new_data.setdefault(CONF_MQTT_PORT, DEFAULT_MQTT_PORT)
+        new_data.setdefault(CONF_NODE_ID, None)
+        new_data.setdefault(CONF_CONTROLLER_NODE_ID, DEFAULT_CONTROLLER_NODE_ID)
+        new_data.setdefault("provisioned", False)
+        hass.config_entries.async_update_entry(
+            config_entry, data=new_data, version=2
+        )
+        _LOGGER.info("RFWC5 migration to version 2 successful")
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -91,9 +124,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
         hass.data[DOMAIN][entry.entry_id]["provision_report"] = report
+        # Only mark provisioned=True if it actually ran (node_id was set)
+        # If node_id was missing, leave provisioned=False so it retries
+        # once the user configures MQTT settings and presses Reprovision.
+        mark_provisioned = report.get("error") != "node_id not configured"
         hass.config_entries.async_update_entry(
             entry,
-            data={**entry.data, "provisioned": True, "provision_report": report},
+            data={
+                **entry.data,
+                "provisioned": mark_provisioned,
+                "provision_report": report,
+            },
         )
     else:
         _LOGGER.debug("RFWC5 %s already provisioned, skipping", device_id)
@@ -134,7 +175,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if atype not in (ACTION_TYPE_NONE, ACTION_TYPE_HA_SCENE) and aentity:
             tracked_entities.append(aentity)
 
-    _LOGGER.warning("RFWC5 %s tracking entities: %s", entry.entry_id, tracked_entities)
+    _LOGGER.debug("RFWC5 %s tracking entities: %s", entry.entry_id, tracked_entities)
 
     if tracked_entities:
         @callback
@@ -146,7 +187,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     new_state = event.data.get("new_state")
                     if new_state is not None:
                         is_on = new_state.state == STATE_ON
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "RFWC5 linked entity changed: entity=%s state=%s button=%d",
                             changed_entity, is_on, btn_idx,
                         )

@@ -116,7 +116,7 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                           filtered to the correct domain per action type
     """
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}

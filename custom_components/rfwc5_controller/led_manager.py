@@ -124,7 +124,7 @@ class RFWC5LedManager:
         Called when the Z-Wave indicator value changes externally.
         Decodes the bitmask and pushes state updates to switch entities.
         """
-        _LOGGER.warning(
+        _LOGGER.debug(
             "RFWC5 ingest_indicator: raw=%d decoded=%s",
             raw_value, self._decode(raw_value),
         )
@@ -139,7 +139,7 @@ class RFWC5LedManager:
         Set a single button LED state and schedule a debounced Z-Wave write.
         Rapid calls cancel-and-restart the debounce timer (mode: restart).
         """
-        _LOGGER.warning(
+        _LOGGER.debug(
             "RFWC5 set_button called: index=%d state=%s current_leds=%s",
             button_index, state, self._leds,
         )
@@ -179,7 +179,7 @@ class RFWC5LedManager:
     async def _async_refresh_and_read(self) -> None:
         """Refresh the indicator value from the device and parse it."""
         async with self._write_lock:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "RFWC5 refresh_and_read: indicator_entity=%s",
                 self._indicator_entity_id(),
             )
@@ -200,7 +200,7 @@ class RFWC5LedManager:
         """Encode current LED state and send set_value to the device."""
         async with self._write_lock:
             target_value = self._encode(self._leds)
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "RFWC5 PRE-WRITE: leds=%s encoded_value=%d device_id=%s",
                 self._leds, target_value, self.device_id,
             )
@@ -216,7 +216,7 @@ class RFWC5LedManager:
                     },
                     blocking=True,
                 )
-                _LOGGER.warning("RFWC5 POST-WRITE: service call completed")
+                _LOGGER.debug("RFWC5 POST-WRITE: service call completed")
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error(
                     "RFWC5 %s failed to write indicator value: %s",

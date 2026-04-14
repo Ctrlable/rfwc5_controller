@@ -72,7 +72,10 @@ class MQTTProvisioner:
         """Run the full MQTT provisioning sequence and return a report."""
         if self._node_id is None:
             _LOGGER.warning(
-                "RFWC5 provisioner: node_id not configured — skipping provisioning"
+                "RFWC5 provisioning skipped: node_id not set. "
+                "Go to Settings → Devices & Services → RFWC5 Controller → "
+                "Configure to enter your Z-Wave node ID and MQTT settings, "
+                "then use the Reprovision button to run provisioning."
             )
             return {"associations": {}, "levels": {}, "success": False,
                     "error": "node_id not configured"}
