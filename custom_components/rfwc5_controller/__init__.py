@@ -289,9 +289,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     covers = [e.strip() for e in aentity.split(",") if e.strip()]
                     if changed_entity not in covers:
                         continue
-                    controller = CoverCycleController(
-                        hass, covers, f"{entry.entry_id}_{btn_idx}"
-                    )
+                    direction_key = f"{entry.entry_id}_{btn_idx}"
+                    controller = CoverCycleController(hass, covers, direction_key)
+                    # Advance OPENING→OPEN or CLOSING→CLOSED when HA confirms it
+                    controller.sync_from_ha_state()
+                    # LED is derived from internal state — no HA lag
                     is_on = controller.get_led_state()
                     _LOGGER.debug(
                         "RFWC5 cover entity changed: entity=%s led=%s button=%d",
