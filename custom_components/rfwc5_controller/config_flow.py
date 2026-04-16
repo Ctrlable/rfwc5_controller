@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er, device_registry as dr
 
 from .const import (
     ACTION_TYPE_AUTOMATION,
+    ACTION_TYPE_COVER_CYCLE,
     ACTION_TYPE_HA_SCENE,
     ACTION_TYPE_NONE,
     ACTION_TYPE_SCRIPT,
@@ -279,7 +280,7 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_entities(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 4: Entity pickers for buttons that need one, filtered by domain."""
+        """Step 6: Entity pickers for buttons that need one, filtered by domain."""
         active = [
             i for i in range(NUM_BUTTONS)
             if self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE] != ACTION_TYPE_NONE
@@ -302,14 +303,26 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         for i in active:
             n = i + 1
             action_type = self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE]
-            entities = _get_entities_for_action_type(self.hass, action_type)
             current = self._data[CONF_BUTTONS][i].get(CONF_BUTTON_ACTION_ENTITY, "")
-            field = vol.Optional(f"button_{n}_entity", default=current)
-            schema_dict[field] = vol.In(entities) if entities else str
+            if action_type == ACTION_TYPE_COVER_CYCLE:
+                # Free-text field: comma-separated cover entity_ids
+                suggested = current if current else "cover.shade_1, cover.shade_2"
+                field = vol.Optional(
+                    f"button_{n}_entity",
+                    description={"suggested_value": suggested},
+                )
+                schema_dict[field] = str
+            else:
+                entities = _get_entities_for_action_type(self.hass, action_type)
+                field = vol.Optional(f"button_{n}_entity", default=current)
+                schema_dict[field] = vol.In(entities) if entities else str
 
         return self.async_show_form(
             step_id="entities",
             data_schema=vol.Schema(schema_dict),
+            description_placeholders={
+                "cover_hint": "For Cover Cycle buttons: enter comma-separated entity IDs, e.g. cover.living_room_shade, cover.office_shade"
+            },
         )
 
     @staticmethod
@@ -500,7 +513,7 @@ class RFWC5OptionsFlow(config_entries.OptionsFlow):
     async def async_step_entities(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 4: Entity pickers for buttons that need one, filtered by domain."""
+        """Step 6: Entity pickers for buttons that need one, filtered by domain."""
         active = [
             i for i in range(NUM_BUTTONS)
             if self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE] != ACTION_TYPE_NONE
@@ -521,12 +534,24 @@ class RFWC5OptionsFlow(config_entries.OptionsFlow):
         for i in active:
             n = i + 1
             action_type = self._data[CONF_BUTTONS][i][CONF_BUTTON_ACTION_TYPE]
-            entities = _get_entities_for_action_type(self.hass, action_type)
             current = self._data[CONF_BUTTONS][i].get(CONF_BUTTON_ACTION_ENTITY, "")
-            field = vol.Optional(f"button_{n}_entity", default=current)
-            schema_dict[field] = vol.In(entities) if entities else str
+            if action_type == ACTION_TYPE_COVER_CYCLE:
+                # Free-text field: comma-separated cover entity_ids
+                suggested = current if current else "cover.shade_1, cover.shade_2"
+                field = vol.Optional(
+                    f"button_{n}_entity",
+                    description={"suggested_value": suggested},
+                )
+                schema_dict[field] = str
+            else:
+                entities = _get_entities_for_action_type(self.hass, action_type)
+                field = vol.Optional(f"button_{n}_entity", default=current)
+                schema_dict[field] = vol.In(entities) if entities else str
 
         return self.async_show_form(
             step_id="entities",
             data_schema=vol.Schema(schema_dict),
+            description_placeholders={
+                "cover_hint": "For Cover Cycle buttons: enter comma-separated entity IDs, e.g. cover.living_room_shade, cover.office_shade"
+            },
         )

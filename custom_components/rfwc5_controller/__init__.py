@@ -7,8 +7,8 @@ One config entry  = one physical RFWC5 keypad.
 
 For each entry we:
   1. Create one RFWC5LedManager (LED bitmask owner + serialised Z-Wave writer)
-  2. Register a zwave_js value_updated event listener that feeds incoming
-     indicator changes into the LedManager → updates switch entities
+  2. Register a state_changed listener on the Basic CC sensor so we detect
+     button presses (values 10/20/30/40/50) and releases (value 0)
   3. Register a state_changed listener for any linked action entities so
      that external state changes (e.g. another automation turning a scene on)
      are reflected in the keypad LEDs automatically
@@ -17,9 +17,9 @@ For each entry we:
 Race-condition strategy
 -----------------------
 ALL writes to the Z-Wave device go through RFWC5LedManager._async_write_now()
-which holds an asyncio.Lock.  The lock prevents concurrent refresh→read→write
-sequences.  On top of that, a 1-second debounce timer collapses rapid
-consecutive button presses into one write.
+which holds an asyncio.Lock.  A coalescing timer collapses rapid consecutive
+changes into one write.  A suppression window prevents action side-effects
+from scheduling redundant writes.
 """
 
 from __future__ import annotations
@@ -34,13 +34,11 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.const import STATE_ON
 
+from .action_executor import async_execute_action
 from .const import (
-    ACTION_TYPE_AUTOMATION,
+    ACTION_TYPE_COVER_CYCLE,
     ACTION_TYPE_HA_SCENE,
     ACTION_TYPE_NONE,
-    ACTION_TYPE_SCRIPT,
-    ACTION_TYPE_STATEFUL_SCENE,
-    ACTION_TYPE_TOGGLE,
     CONF_BASIC_SENSOR,
     CONF_BUTTONS,
     CONF_BUTTON_ACTION_ENTITY,
@@ -66,48 +64,11 @@ from .const import (
     SERVICE_SET_BUTTON_LED,
     SERVICE_SYNC_LEDS,
 )
+from .cover_controller import CoverCycleController
 from .led_manager import RFWC5LedManager
 from .provisioner import MQTTProvisioner
 
 _LOGGER = logging.getLogger(__name__)
-
-
-async def async_execute_action(
-    hass: HomeAssistant,
-    action_type: str | None,
-    action_entity: str | None,
-    is_on: bool,
-) -> None:
-    """Execute the configured HA action for a button press or release."""
-    if not action_type or action_type == ACTION_TYPE_NONE or not action_entity:
-        return
-    try:
-        if action_type == ACTION_TYPE_HA_SCENE:
-            if is_on:
-                await hass.services.async_call(
-                    "scene", "turn_on", {"entity_id": action_entity}
-                )
-        elif action_type == ACTION_TYPE_STATEFUL_SCENE:
-            svc = "turn_on" if is_on else "turn_off"
-            await hass.services.async_call("switch", svc, {"entity_id": action_entity})
-        elif action_type == ACTION_TYPE_AUTOMATION:
-            if is_on:
-                await hass.services.async_call(
-                    "automation", "trigger", {"entity_id": action_entity}
-                )
-        elif action_type == ACTION_TYPE_SCRIPT:
-            svc = "turn_on" if is_on else "turn_off"
-            await hass.services.async_call("script", svc, {"entity_id": action_entity})
-        elif action_type == ACTION_TYPE_TOGGLE:
-            svc = "turn_on" if is_on else "turn_off"
-            await hass.services.async_call(
-                "homeassistant", svc, {"entity_id": action_entity}
-            )
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.warning(
-            "RFWC5 action failed (type=%s entity=%s is_on=%s): %s",
-            action_type, action_entity, is_on, err,
-        )
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -190,8 +151,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         hass.data[DOMAIN][entry.entry_id]["provision_report"] = report
         # Only mark provisioned=True if it actually ran (node_id was set)
-        # If node_id was missing, leave provisioned=False so it retries
-        # once the user configures MQTT settings and presses Reprovision.
         mark_provisioned = report.get("error") != "node_id not configured"
         hass.config_entries.async_update_entry(
             entry,
@@ -243,6 +202,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             cfg.get(CONF_BUTTON_ACTION_TYPE),
                             cfg.get(CONF_BUTTON_ACTION_ENTITY),
                             False,
+                            direction_key=f"{entry.entry_id}_{btn_idx}",
                         )
                         _LOGGER.info("RFWC5 button %d OFF → action fired", btn_idx + 1)
                         manager.suppress_external_writes(LED_SUPPRESS_WINDOW_S)
@@ -257,6 +217,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             cfg.get(CONF_BUTTON_ACTION_TYPE),
                             cfg.get(CONF_BUTTON_ACTION_ENTITY),
                             True,
+                            direction_key=f"{entry.entry_id}_{btn_idx}",
                         )
                         _LOGGER.info(
                             "RFWC5 button %d ON (value=%d) → action fired",
@@ -299,14 +260,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # ---------------------------------------------------------------
     # Watch linked action entities for external state changes
-    # so LEDs stay in sync when scenes/automations change outside HA UI
+    # so LEDs stay in sync when scenes/automations/covers change outside HA UI
     # ---------------------------------------------------------------
     tracked_entities: list[str] = []
     for cfg in buttons_cfg:
         atype = cfg.get(CONF_BUTTON_ACTION_TYPE, ACTION_TYPE_NONE)
         aentity = cfg.get(CONF_BUTTON_ACTION_ENTITY, "")
         if atype not in (ACTION_TYPE_NONE, ACTION_TYPE_HA_SCENE) and aentity:
-            tracked_entities.append(aentity)
+            if atype == ACTION_TYPE_COVER_CYCLE:
+                # aentity is a CSV of cover entity_ids — track each one
+                covers = [e.strip() for e in aentity.split(",") if e.strip()]
+                tracked_entities.extend(covers)
+            else:
+                tracked_entities.append(aentity)
 
     _LOGGER.debug("RFWC5 %s tracking entities: %s", entry.entry_id, tracked_entities)
 
@@ -316,26 +282,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """Sync LED when a linked entity changes state externally."""
             changed_entity = event.data.get("entity_id")
             for btn_idx, cfg in enumerate(buttons_cfg):
-                if cfg.get(CONF_BUTTON_ACTION_ENTITY) == changed_entity:
+                atype = cfg.get(CONF_BUTTON_ACTION_TYPE, ACTION_TYPE_NONE)
+                aentity = cfg.get(CONF_BUTTON_ACTION_ENTITY, "")
+
+                if atype == ACTION_TYPE_COVER_CYCLE:
+                    covers = [e.strip() for e in aentity.split(",") if e.strip()]
+                    if changed_entity not in covers:
+                        continue
+                    controller = CoverCycleController(
+                        hass, covers, f"{entry.entry_id}_{btn_idx}"
+                    )
+                    is_on = controller.get_led_state()
+                    _LOGGER.debug(
+                        "RFWC5 cover entity changed: entity=%s led=%s button=%d",
+                        changed_entity, is_on, btn_idx,
+                    )
+                elif aentity == changed_entity:
                     new_state = event.data.get("new_state")
-                    if new_state is not None:
-                        is_on = new_state.state == STATE_ON
-                        _LOGGER.debug(
-                            "RFWC5 linked entity changed: entity=%s state=%s button=%d",
-                            changed_entity, is_on, btn_idx,
-                        )
-                        # Always update in-memory LED state so it stays accurate
-                        manager._leds[btn_idx] = is_on
-                        manager._notify_listeners(btn_idx, is_on)
-                        # Suppress the write if this state change was caused by
-                        # our own button press action (2s suppression window)
-                        if time.monotonic() > manager._suppress_until:
-                            manager._schedule_write()
-                        else:
-                            _LOGGER.debug(
-                                "RFWC5 suppressing write from external state change "
-                                "— within suppression window"
-                            )
+                    if new_state is None:
+                        continue
+                    is_on = new_state.state == STATE_ON
+                    _LOGGER.debug(
+                        "RFWC5 linked entity changed: entity=%s state=%s button=%d",
+                        changed_entity, is_on, btn_idx,
+                    )
+                else:
+                    continue
+
+                # Common: update LED state and schedule write (with suppression check)
+                manager._leds[btn_idx] = is_on
+                manager._notify_listeners(btn_idx, is_on)
+                if time.monotonic() > manager._suppress_until:
+                    manager._schedule_write()
+                else:
+                    _LOGGER.debug(
+                        "RFWC5 suppressing write from external state change "
+                        "— within suppression window"
+                    )
 
         unsub_state = async_track_state_change_event(
             hass,
@@ -379,7 +362,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if unsub_state:
             unsub_state()
 
-        # Cancel any pending debounce
+        # Cancel any pending coalesce timer
         manager: RFWC5LedManager | None = entry_data.get("manager")
         if manager and manager._debounce_unsub:
             manager._debounce_unsub()

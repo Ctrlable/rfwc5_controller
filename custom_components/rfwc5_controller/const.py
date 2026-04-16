@@ -59,6 +59,7 @@ ACTION_TYPE_HA_SCENE = "ha_scene"               # scene.*
 ACTION_TYPE_AUTOMATION = "automation"           # automation.*
 ACTION_TYPE_SCRIPT = "script"                   # script.*
 ACTION_TYPE_TOGGLE = "entity_toggle"            # any entity with on/off state
+ACTION_TYPE_COVER_CYCLE = "cover_cycle"         # cover.* — Lutron-style Up/Stop/Down cycle
 ACTION_TYPE_NONE = "none"
 
 ACTION_TYPES = [
@@ -67,8 +68,24 @@ ACTION_TYPES = [
     ACTION_TYPE_AUTOMATION,
     ACTION_TYPE_SCRIPT,
     ACTION_TYPE_TOGGLE,
+    ACTION_TYPE_COVER_CYCLE,
     ACTION_TYPE_NONE,
 ]
+
+# Cover cycle — button config key for multi-entity CSV string
+CONF_BUTTON_COVER_ENTITIES = "cover_entities"
+
+# Cover state strings
+COVER_STATE_OPEN = "open"
+COVER_STATE_CLOSED = "closed"
+COVER_STATE_OPENING = "opening"
+COVER_STATE_CLOSING = "closing"
+COVER_STATE_STOPPED = "stopped"
+
+# Cover HA service names
+COVER_SERVICE_OPEN = "open_cover"
+COVER_SERVICE_CLOSE = "close_cover"
+COVER_SERVICE_STOP = "stop_cover"
 
 # Services exposed by this integration
 SERVICE_SYNC_LEDS = "sync_leds"

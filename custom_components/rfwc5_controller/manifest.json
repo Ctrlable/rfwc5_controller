@@ -1,7 +1,7 @@
 {
   "domain": "rfwc5_controller",
   "name": "Eaton RFWC5 Z-Wave Keypad Controller",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "documentation": "https://github.com/ctrlable/rfwc5_controller",
   "issue_tracker": "https://github.com/ctrlable/rfwc5_controller/issues",
   "dependencies": ["zwave_js"],

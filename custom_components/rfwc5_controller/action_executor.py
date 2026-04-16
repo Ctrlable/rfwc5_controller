@@ -29,12 +29,14 @@ from homeassistant.const import (
 
 from .const import (
     ACTION_TYPE_AUTOMATION,
+    ACTION_TYPE_COVER_CYCLE,
     ACTION_TYPE_HA_SCENE,
     ACTION_TYPE_NONE,
     ACTION_TYPE_SCRIPT,
     ACTION_TYPE_STATEFUL_SCENE,
     ACTION_TYPE_TOGGLE,
 )
+from .cover_controller import CoverCycleController
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ async def async_execute_action(
     action_type: str,
     action_entity: str,
     desired_state: bool,
+    **kwargs: Any,
 ) -> None:
     """
     Execute the button's action based on its configured type and the new LED state.
@@ -51,13 +54,25 @@ async def async_execute_action(
     Args:
         hass:           HomeAssistant instance
         action_type:    One of the ACTION_TYPE_* constants
-        action_entity:  entity_id of the target
+        action_entity:  entity_id (or CSV of entity_ids for cover_cycle)
         desired_state:  True = button turned ON, False = button turned OFF
+        **kwargs:
+          direction_key (str): unique key for CoverCycleController direction
+                               memory, scoped per entry+button. Defaults to
+                               the first 50 chars of action_entity.
     """
     if action_type == ACTION_TYPE_NONE or not action_entity:
         return
 
     try:
+        if action_type == ACTION_TYPE_COVER_CYCLE:
+            cover_entities = [e.strip() for e in action_entity.split(",") if e.strip()]
+            if cover_entities:
+                direction_key = kwargs.get("direction_key", action_entity[:50])
+                controller = CoverCycleController(hass, cover_entities, direction_key)
+                await controller.async_cycle()
+            return
+
         if action_type == ACTION_TYPE_STATEFUL_SCENE:
             # stateful_scenes creates switch.* entities — toggle them directly
             await _call_switch(hass, action_entity, desired_state)
@@ -129,12 +144,21 @@ def get_tracked_state(
 
     Returns None for HA Scenes (stateless), automations that merely trigger,
     and ACTION_TYPE_NONE.
+
+    For cover_cycle, computes LED state from all cover positions.
     """
     if action_type in (ACTION_TYPE_NONE, ACTION_TYPE_HA_SCENE):
         return None
 
     if not action_entity:
         return None
+
+    if action_type == ACTION_TYPE_COVER_CYCLE:
+        cover_entities = [e.strip() for e in action_entity.split(",") if e.strip()]
+        if not cover_entities:
+            return False
+        controller = CoverCycleController(hass, cover_entities, action_entity[:50])
+        return controller.get_led_state()
 
     state = hass.states.get(action_entity)
     if state is None:

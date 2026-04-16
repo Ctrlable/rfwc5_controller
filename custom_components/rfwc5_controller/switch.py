@@ -28,6 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .action_executor import async_execute_action, get_tracked_state
 from .const import (
+    ACTION_TYPE_COVER_CYCLE,
     CONF_BUTTONS,
     CONF_BUTTON_ACTION_ENTITY,
     CONF_BUTTON_ACTION_TYPE,
@@ -36,6 +37,7 @@ from .const import (
     DOMAIN,
     NUM_BUTTONS,
 )
+from .cover_controller import CoverCycleController
 from .led_manager import RFWC5LedManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -157,11 +159,26 @@ class RFWC5ButtonSwitch(SwitchEntity):
         action_type = self._config.get(CONF_BUTTON_ACTION_TYPE)
         action_entity = self._config.get(CONF_BUTTON_ACTION_ENTITY, "")
 
-        # 1. Update LED manager (schedules debounced Z-Wave write)
+        if action_type == ACTION_TYPE_COVER_CYCLE:
+            # Cover cycle: fire the cycle command; don't force LED here —
+            # the cover state change will update LED via the entity watcher
+            cover_entities = [e.strip() for e in action_entity.split(",") if e.strip()]
+            if cover_entities:
+                direction_key = f"{self._entry.entry_id}_{self._index}"
+                controller = CoverCycleController(
+                    self.hass, cover_entities, direction_key
+                )
+                await controller.async_cycle()
+            return
+
+        # 1. Update LED manager (schedules coalesced Z-Wave write)
         await self._manager.async_set_button(self._index, state)
 
         # 2. Push HA state immediately so UI feels responsive
         self.async_write_ha_state()
 
         # 3. Execute the configured action
-        await async_execute_action(self.hass, action_type, action_entity, state)
+        await async_execute_action(
+            self.hass, action_type, action_entity, state,
+            direction_key=f"{self._entry.entry_id}_{self._index}",
+        )
