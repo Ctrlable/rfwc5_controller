@@ -72,6 +72,17 @@ ACTION_TYPES = [
     ACTION_TYPE_NONE,
 ]
 
+# Human-readable labels for action types — used in config flow SelectSelector
+ACTION_TYPE_LABELS: dict[str, str] = {
+    ACTION_TYPE_STATEFUL_SCENE: "Stateful Scene",
+    ACTION_TYPE_HA_SCENE:       "HA Scene",
+    ACTION_TYPE_AUTOMATION:     "Automation",
+    ACTION_TYPE_SCRIPT:         "Script",
+    ACTION_TYPE_TOGGLE:         "Entity Toggle (On/Off)",
+    ACTION_TYPE_COVER_CYCLE:    "Cover Cycle (Up / Stop / Down)",
+    ACTION_TYPE_NONE:           "None (LED only)",
+}
+
 # Cover cycle — button config key for multi-entity CSV string
 CONF_BUTTON_COVER_ENTITIES = "cover_entities"
 

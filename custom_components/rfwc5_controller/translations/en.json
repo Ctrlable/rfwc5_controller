@@ -53,7 +53,7 @@
       },
       "entities": {
         "title": "Assign Entities",
-        "description": "Select the target entity for each active button. {cover_hint}",
+        "description": "Select the target entity for each active button.",
         "data": {
           "button_1_entity": "Button 1 Entity",
           "button_2_entity": "Button 2 Entity",
@@ -121,7 +121,7 @@
       },
       "entities": {
         "title": "Assign Entities",
-        "description": "Select the target entity for each active button. {cover_hint}",
+        "description": "Select the target entity for each active button.",
         "data": {
           "button_1_entity": "Button 1 Entity",
           "button_2_entity": "Button 2 Entity",
