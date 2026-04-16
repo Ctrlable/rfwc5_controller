@@ -23,6 +23,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ACTION_TYPE_LABELS,
     ACTION_TYPE_NONE,
     CONF_BUTTONS,
     CONF_BUTTON_ACTION_ENTITY,
@@ -42,7 +43,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up one action-summary sensor per button plus a provisioning status sensor."""
     entities: list[SensorEntity] = [
-        RFWC5ButtonActionSensor(entry=entry, button_index=i)
+        RFWC5ButtonActionSensor(hass=hass, entry=entry, button_index=i)
         for i in range(NUM_BUTTONS)
     ]
     entities.append(RFWC5ProvisioningStatusSensor(hass=hass, entry=entry))
@@ -56,7 +57,8 @@ class RFWC5ButtonActionSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:information-outline"
 
-    def __init__(self, entry: ConfigEntry, button_index: int) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, button_index: int) -> None:
+        self.hass = hass
         self._entry = entry
         self._index = button_index
         n = button_index + 1
@@ -99,9 +101,26 @@ class RFWC5ButtonActionSensor(SensorEntity):
         label = cfg.get(CONF_BUTTON_LABEL, f"Button {self._index + 1}")
         atype = cfg.get(CONF_BUTTON_ACTION_TYPE, ACTION_TYPE_NONE)
         aentity = cfg.get(CONF_BUTTON_ACTION_ENTITY, "")
+        friendly_type = ACTION_TYPE_LABELS.get(atype, atype)
         if atype == ACTION_TYPE_NONE:
-            return f"{label} → none"
-        return f"{label} → {atype}: {aentity}"
+            return f"{label} → None"
+        if aentity:
+            state = self.hass.states.get(aentity.split(",")[0].strip())
+            entity_name = (
+                state.attributes.get("friendly_name") or aentity
+                if state else aentity
+            )
+        else:
+            entity_name = ""
+        return f"{label} → {friendly_type}: {entity_name}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        cfg = self._config
+        return {
+            "action_type": cfg.get(CONF_BUTTON_ACTION_TYPE, ACTION_TYPE_NONE),
+            "action_entity": cfg.get(CONF_BUTTON_ACTION_ENTITY, ""),
+        }
 
     # ------------------------------------------------------------------
     # Lifecycle
