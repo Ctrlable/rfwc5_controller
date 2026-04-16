@@ -2,7 +2,7 @@
 LED State Manager for Eaton RFWC5 Z-Wave keypad.
 
 This module owns the single source of truth for the 5-button LED bitmask and
-serialises every read-modify-write to the Z-Wave device through an asyncio queue,
+serialises every read-modify-write to the Z-Wave device through an asyncio lock,
 completely eliminating race conditions when multiple buttons change state
 simultaneously.
 
@@ -13,12 +13,32 @@ Bitmask encoding (Indicator CC value 0-32):
   Button 4 → bit 3 (weight  8)
   Button 5 → bit 4 (weight 16)
   All OFF  → special value 32 (device quirk)
+
+Write coalescing strategy
+-------------------------
+Rapid state changes (e.g. a button press that fires an action which in turn
+triggers a linked entity state change) are coalesced into a single Z-Wave
+write:
+
+  1. _schedule_write() marks _write_pending = True and (re)starts a coalesce
+     timer.  Any subsequent call within the coalesce window cancels and
+     restarts the timer, so only the final state is written.
+
+  2. _async_write_now() is guarded by _write_in_progress.  A second call
+     while a write is executing returns immediately; the finally block checks
+     _write_pending and schedules a follow-up write if more changes arrived
+     during the write.
+
+  3. suppress_external_writes() lets callers (e.g. the button press handler
+     in __init__.py) open a suppression window so that entity state changes
+     caused by our own actions do not re-enter the write path.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable
 
 from homeassistant.core import HomeAssistant, callback
@@ -27,7 +47,7 @@ from homeassistant.helpers.event import async_call_later
 from .const import (
     BUTTON_BITMASKS,
     INDICATOR_ALL_OFF_VALUE,
-    LED_WRITE_DEBOUNCE_S,
+    LED_COALESCE_WINDOW_S,
     NUM_BUTTONS,
     REFRESH_SETTLE_S,
     ZWAVE_INDICATOR_CC,
@@ -46,9 +66,8 @@ class RFWC5LedManager:
     1. On HA start, call `async_initialize()` which refreshes the device and
        reads the current indicator value to warm-up internal state.
     2. When a button switch entity is turned on/off, call
-       `async_set_button(index, state)`.  The manager debounces rapid changes
-       (mode=restart semantics) and issues a single set_value after the quiet
-       period.
+       `async_set_button(index, state)`.  The manager coalesces rapid changes
+       and issues a single set_value after the quiet period.
     3. When the Z-Wave indicator value changes from an external source (e.g. a
        direct key press), call `async_ingest_indicator(value)` so internal
        state and switch entities stay in sync.
@@ -72,8 +91,19 @@ class RFWC5LedManager:
         # Listeners registered by switch entities so they can update HA state
         self._state_listeners: list[Callable[[int, bool], None]] = []
 
-        # Debounce handle
+        # Coalesce timer handle (replaces simple debounce)
         self._debounce_unsub: Callable | None = None
+
+        # Write guard flags
+        self._write_pending = False      # a write is queued but not yet running
+        self._write_in_progress = False  # a write is currently executing
+
+        # Coalesce window: wait this long after the last change before writing
+        self._coalesce_window: float = LED_COALESCE_WINDOW_S
+
+        # Suppression window: monotonic deadline before which external-entity
+        # writes are suppressed (set by suppress_external_writes())
+        self._suppress_until: float = 0.0
 
         # Serialisation lock – guards the refresh→read→compute→write sequence
         self._write_lock = asyncio.Lock()
@@ -146,8 +176,9 @@ class RFWC5LedManager:
 
     async def async_set_button(self, button_index: int, state: bool) -> None:
         """
-        Set a single button LED state and schedule a debounced Z-Wave write.
-        Rapid calls cancel-and-restart the debounce timer (mode: restart).
+        Set a single button LED state and schedule a coalesced Z-Wave write.
+        Rapid calls extend the coalesce window (always waits for the quiet period
+        after the LAST change before writing).
         """
         _LOGGER.debug(
             "RFWC5 set_button called: index=%d state=%s current_leds=%s",
@@ -161,14 +192,39 @@ class RFWC5LedManager:
         if self._debounce_unsub is not None:
             self._debounce_unsub()
             self._debounce_unsub = None
-        await self._async_write_now()
+        self._write_pending = False
+        if not self._write_in_progress:
+            await self._async_write_now()
+
+    def suppress_external_writes(self, duration: float) -> None:
+        """
+        Suppress writes triggered by external state changes for duration seconds.
+        Called after a button press fires an action so the resulting entity state
+        changes do not re-enter the write path and schedule redundant writes.
+        """
+        self._suppress_until = time.monotonic() + duration
 
     # ------------------------------------------------------------------
-    # Debounce
+    # Coalescing write scheduler
     # ------------------------------------------------------------------
 
     def _schedule_write(self) -> None:
-        """Cancel any pending write and schedule a fresh one after the quiet period."""
+        """
+        Mark state as dirty and schedule a coalesced write.
+
+        If a write is already in progress, just mark pending — the in-progress
+        write will schedule a follow-up when done.
+
+        If already waiting, cancel and restart the timer so we always wait for
+        the full coalesce window after the LAST change.
+        """
+        self._write_pending = True
+
+        if self._write_in_progress:
+            # Write in progress will check _write_pending when done
+            return
+
+        # Cancel existing timer and restart
         if self._debounce_unsub is not None:
             self._debounce_unsub()
             self._debounce_unsub = None
@@ -179,11 +235,11 @@ class RFWC5LedManager:
             self.hass.async_create_task(self._async_write_now())
 
         self._debounce_unsub = async_call_later(
-            self.hass, LED_WRITE_DEBOUNCE_S, _fire
+            self.hass, self._coalesce_window, _fire
         )
 
     # ------------------------------------------------------------------
-    # Z-Wave read / write (serialised via lock)
+    # Z-Wave read / write (serialised via lock + write guard)
     # ------------------------------------------------------------------
 
     async def _async_refresh_and_read(self) -> None:
@@ -208,14 +264,25 @@ class RFWC5LedManager:
                 self._leds = self._decode(raw)
 
     async def _async_write_now(self) -> None:
-        """Encode current LED state and send set_value to the device."""
-        async with self._write_lock:
-            target_value = self._encode(self._leds)
-            _LOGGER.debug(
-                "RFWC5 PRE-WRITE: leds=%s encoded_value=%d device_id=%s",
-                self._leds, target_value, self.device_id,
-            )
-            try:
+        """
+        Write current LED state to device.
+
+        Uses _write_in_progress guard to prevent concurrent writes.
+        If another change arrived while writing, schedules a follow-up write.
+        """
+        if self._write_in_progress:
+            return  # already writing; _write_pending flag will trigger a follow-up
+
+        self._write_in_progress = True
+        self._write_pending = False
+
+        try:
+            async with self._write_lock:
+                target_value = self._encode(self._leds)
+                _LOGGER.debug(
+                    "RFWC5 %s writing indicator: leds=%s value=%d",
+                    self.device_id, self._leds, target_value,
+                )
                 await self.hass.services.async_call(
                     "zwave_js",
                     "set_value",
@@ -227,13 +294,23 @@ class RFWC5LedManager:
                     },
                     blocking=True,
                 )
-                _LOGGER.debug("RFWC5 POST-WRITE: service call completed")
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.error(
-                    "RFWC5 %s failed to write indicator value: %s",
+                _LOGGER.debug("RFWC5 %s write complete", self.device_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "RFWC5 %s write failed: %s", self.device_id, err
+            )
+        finally:
+            self._write_in_progress = False
+
+            # If another change arrived while we were writing,
+            # schedule a follow-up write after the coalesce window
+            if self._write_pending:
+                _LOGGER.debug(
+                    "RFWC5 %s changes arrived during write — "
+                    "scheduling follow-up write",
                     self.device_id,
-                    err,
                 )
+                self._schedule_write()
 
     # ------------------------------------------------------------------
     # Helpers

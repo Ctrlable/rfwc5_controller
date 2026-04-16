@@ -75,8 +75,13 @@ SERVICE_SYNC_LEDS = "sync_leds"
 SERVICE_SET_BUTTON_LED = "set_button_led"
 SERVICE_REPROVISION = "reprovision"
 
-# Debounce delay in seconds before writing to Z-Wave
-LED_WRITE_DEBOUNCE_S = 1.0
+# Coalescing write window: wait this long after the last change before writing
+LED_COALESCE_WINDOW_S = 0.5
+
+# Suppression window: suppress external-entity-change writes for this long
+# after a button press action fires (prevents the action's side-effects from
+# scheduling a redundant write)
+LED_SUPPRESS_WINDOW_S = 2.0
 
 # How long to wait after refresh_value before reading indicator state (ms → s)
 REFRESH_SETTLE_S = 0.5

@@ -25,6 +25,7 @@ consecutive button presses into one write.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -58,6 +59,7 @@ from .const import (
     DEFAULT_MQTT_PORT,
     DEFAULT_MQTT_PREFIX,
     DOMAIN,
+    LED_SUPPRESS_WINDOW_S,
     NUM_BUTTONS,
     PLATFORMS,
     SERVICE_REPROVISION,
@@ -243,6 +245,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             False,
                         )
                         _LOGGER.info("RFWC5 button %d OFF → action fired", btn_idx + 1)
+                        manager.suppress_external_writes(LED_SUPPRESS_WINDOW_S)
             else:
                 matched = False
                 for btn_idx, level in enumerate(group_levels):
@@ -259,6 +262,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             "RFWC5 button %d ON (value=%d) → action fired",
                             btn_idx + 1, value,
                         )
+                        manager.suppress_external_writes(LED_SUPPRESS_WINDOW_S)
                         matched = True
                         break
                 if not matched:
@@ -320,11 +324,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             "RFWC5 linked entity changed: entity=%s state=%s button=%d",
                             changed_entity, is_on, btn_idx,
                         )
-                        # Update manager state without triggering another write immediately
-                        # (use internal attribute directly to avoid extra debounce)
+                        # Always update in-memory LED state so it stays accurate
                         manager._leds[btn_idx] = is_on
                         manager._notify_listeners(btn_idx, is_on)
-                        manager._schedule_write()
+                        # Suppress the write if this state change was caused by
+                        # our own button press action (2s suppression window)
+                        if time.monotonic() > manager._suppress_until:
+                            manager._schedule_write()
+                        else:
+                            _LOGGER.debug(
+                                "RFWC5 suppressing write from external state change "
+                                "— within suppression window"
+                            )
 
         unsub_state = async_track_state_change_event(
             hass,
