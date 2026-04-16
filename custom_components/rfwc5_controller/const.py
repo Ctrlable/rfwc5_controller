@@ -33,6 +33,7 @@ CONF_NODE_ID = "node_id"
 CONF_CONTROLLER_NODE_ID = "controller_node_id"
 CONF_DEVICE_ID = "device_id"        # Z-Wave JS device_id (used for service calls)
 CONF_ENTITY_ID = "indicator_entity" # sensor/number entity that holds indicator value
+CONF_BASIC_SENSOR = "basic_sensor"  # sensor entity reporting Basic CC button press values
 CONF_BUTTONS = "buttons"             # list of 5 button config dicts
 
 # MQTT config keys

@@ -29,12 +29,18 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.const import STATE_ON
 
 from .const import (
+    ACTION_TYPE_AUTOMATION,
     ACTION_TYPE_HA_SCENE,
     ACTION_TYPE_NONE,
+    ACTION_TYPE_SCRIPT,
+    ACTION_TYPE_STATEFUL_SCENE,
+    ACTION_TYPE_TOGGLE,
+    CONF_BASIC_SENSOR,
     CONF_BUTTONS,
     CONF_BUTTON_ACTION_ENTITY,
     CONF_BUTTON_ACTION_TYPE,
@@ -47,6 +53,7 @@ from .const import (
     CONF_MQTT_PREFIX,
     CONF_NODE_ID,
     DEFAULT_CONTROLLER_NODE_ID,
+    DEFAULT_GROUP_LEVELS,
     DEFAULT_MQTT_GATEWAY,
     DEFAULT_MQTT_PORT,
     DEFAULT_MQTT_PREFIX,
@@ -63,14 +70,52 @@ from .provisioner import MQTTProvisioner
 _LOGGER = logging.getLogger(__name__)
 
 
+async def async_execute_action(
+    hass: HomeAssistant,
+    action_type: str | None,
+    action_entity: str | None,
+    is_on: bool,
+) -> None:
+    """Execute the configured HA action for a button press or release."""
+    if not action_type or action_type == ACTION_TYPE_NONE or not action_entity:
+        return
+    try:
+        if action_type == ACTION_TYPE_HA_SCENE:
+            if is_on:
+                await hass.services.async_call(
+                    "scene", "turn_on", {"entity_id": action_entity}
+                )
+        elif action_type == ACTION_TYPE_STATEFUL_SCENE:
+            svc = "turn_on" if is_on else "turn_off"
+            await hass.services.async_call("switch", svc, {"entity_id": action_entity})
+        elif action_type == ACTION_TYPE_AUTOMATION:
+            if is_on:
+                await hass.services.async_call(
+                    "automation", "trigger", {"entity_id": action_entity}
+                )
+        elif action_type == ACTION_TYPE_SCRIPT:
+            svc = "turn_on" if is_on else "turn_off"
+            await hass.services.async_call("script", svc, {"entity_id": action_entity})
+        elif action_type == ACTION_TYPE_TOGGLE:
+            svc = "turn_on" if is_on else "turn_off"
+            await hass.services.async_call(
+                "homeassistant", svc, {"entity_id": action_entity}
+            )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning(
+            "RFWC5 action failed (type=%s entity=%s is_on=%s): %s",
+            action_type, action_entity, is_on, err,
+        )
+
+
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old config entries to the current schema version."""
-    _LOGGER.info(
-        "Migrating RFWC5 entry from version %s", config_entry.version
-    )
+    _LOGGER.info("Migrating RFWC5 entry from version %s", config_entry.version)
+
+    new_data = {**config_entry.data}
 
     if config_entry.version < 2:
-        new_data = {**config_entry.data}
+        # v1 → backfill MQTT provisioning fields
         new_data.setdefault(CONF_MQTT_PREFIX, DEFAULT_MQTT_PREFIX)
         new_data.setdefault(CONF_MQTT_GATEWAY, DEFAULT_MQTT_GATEWAY)
         new_data.setdefault(CONF_MQTT_HOST, "localhost")
@@ -78,11 +123,15 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         new_data.setdefault(CONF_NODE_ID, None)
         new_data.setdefault(CONF_CONTROLLER_NODE_ID, DEFAULT_CONTROLLER_NODE_ID)
         new_data.setdefault("provisioned", False)
-        hass.config_entries.async_update_entry(
-            config_entry, data=new_data, version=2
-        )
-        _LOGGER.info("RFWC5 migration to version 2 successful")
 
+    if config_entry.version < 4:
+        # v2/v3 → backfill basic sensor field; remove any stale MQTT location fields
+        new_data.setdefault(CONF_BASIC_SENSOR, "")
+        new_data.pop("mqtt_location", None)
+        new_data.pop("mqtt_device_name", None)
+
+    hass.config_entries.async_update_entry(config_entry, data=new_data, version=4)
+    _LOGGER.info("RFWC5 migration to version 4 successful")
     return True
 
 
@@ -146,23 +195,89 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await manager.async_initialize()
 
     # ---------------------------------------------------------------
-    # Listen for Z-Wave value_updated events → feed into LedManager
+    # Track Basic CC sensor → detect button presses / releases
     # ---------------------------------------------------------------
-    @callback
-    def _on_zwave_value_updated(event: Event) -> None:
-        """Handle zwave_js value_updated events for the indicator CC."""
-        if event.data.get("device_id") != device_id:
-            return
-        if event.data.get("command_class_name") != "Indicator":
-            return
-        raw = event.data.get("value")
-        if raw is not None:
-            manager.async_ingest_indicator(int(raw))
+    basic_sensor: str = entry.data.get(CONF_BASIC_SENSOR, "")
 
-    unsub_zwave = hass.bus.async_listen(
-        "zwave_js_value_updated", _on_zwave_value_updated
-    )
-    hass.data[DOMAIN][entry.entry_id]["unsub_zwave"] = unsub_zwave
+    if basic_sensor:
+        # Auto-enable the entity if HA has it disabled
+        ent_reg = er.async_get(hass)
+        basic_entry = ent_reg.async_get(basic_sensor)
+        if basic_entry and basic_entry.disabled:
+            _LOGGER.info(
+                "RFWC5 enabling disabled basic sensor entity: %s", basic_sensor
+            )
+            ent_reg.async_update_entity(basic_sensor, disabled_by=None)
+
+        async def _handle_basic_value(value: int) -> None:
+            """React to a Basic CC value reported by the keypad."""
+            group_levels = entry.data.get("group_levels", DEFAULT_GROUP_LEVELS)
+            btn_cfg = hass.data[DOMAIN][entry.entry_id]["buttons"]
+
+            if value == 0:
+                _LOGGER.info("RFWC5 %s button OFF detected — refreshing indicator", entry.entry_id)
+                await manager.async_refresh_and_read_indicator()
+                prev = manager.get_previous_leds()
+                curr = manager._leds[:]
+                for btn_idx in range(NUM_BUTTONS):
+                    if prev[btn_idx] and not curr[btn_idx]:
+                        cfg = btn_cfg[btn_idx]
+                        await async_execute_action(
+                            hass,
+                            cfg.get(CONF_BUTTON_ACTION_TYPE),
+                            cfg.get(CONF_BUTTON_ACTION_ENTITY),
+                            False,
+                        )
+                        _LOGGER.info("RFWC5 button %d OFF → action fired", btn_idx + 1)
+            else:
+                matched = False
+                for btn_idx, level in enumerate(group_levels):
+                    if value == level:
+                        cfg = btn_cfg[btn_idx]
+                        await manager.async_set_button(btn_idx, True)
+                        await async_execute_action(
+                            hass,
+                            cfg.get(CONF_BUTTON_ACTION_TYPE),
+                            cfg.get(CONF_BUTTON_ACTION_ENTITY),
+                            True,
+                        )
+                        _LOGGER.info(
+                            "RFWC5 button %d ON (value=%d) → action fired",
+                            btn_idx + 1, value,
+                        )
+                        matched = True
+                        break
+                if not matched:
+                    _LOGGER.warning(
+                        "RFWC5 Basic value %d matched no button. "
+                        "Expected one of %s. Check group levels.",
+                        value, group_levels,
+                    )
+
+        @callback
+        def _on_basic_sensor_change(event: Event) -> None:
+            new_state = event.data.get("new_state")
+            if new_state is None:
+                return
+            try:
+                value = int(float(new_state.state))
+            except (ValueError, TypeError):
+                return
+            hass.async_create_task(_handle_basic_value(value))
+
+        unsub_basic = async_track_state_change_event(
+            hass, [basic_sensor], _on_basic_sensor_change
+        )
+        hass.data[DOMAIN][entry.entry_id]["unsub_basic"] = unsub_basic
+        _LOGGER.info(
+            "RFWC5 %s tracking basic sensor: %s", entry.entry_id, basic_sensor
+        )
+    else:
+        _LOGGER.warning(
+            "RFWC5 %s no basic sensor configured — button presses will not be "
+            "detected. Go to Configure to select the Basic sensor entity.",
+            entry.entry_id,
+        )
 
     # ---------------------------------------------------------------
     # Watch linked action entities for external state changes
@@ -224,12 +339,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id, {})
 
-        # Cancel Z-Wave event listener
-        unsub = entry_data.get("unsub_zwave")
-        if unsub:
-            unsub()
+        # Cancel basic sensor state tracker
+        unsub_basic = entry_data.get("unsub_basic")
+        if unsub_basic:
+            unsub_basic()
 
-        # Cancel state watcher
+        # Cancel linked-entity state watcher
         unsub_state = entry_data.get("unsub_state")
         if unsub_state:
             unsub_state()

@@ -16,6 +16,13 @@
           "indicator_entity": "Indicator Sensor / Number Entity"
         }
       },
+      "basic_sensor": {
+        "title": "Select Basic Sensor",
+        "description": "Select the Basic sensor entity for this keypad. This entity reports button press values (10/20/30/40/50). If it appears disabled in HA, the integration will enable it automatically.",
+        "data": {
+          "basic_sensor": "Basic Sensor Entity"
+        }
+      },
       "mqtt": {
         "title": "Z-Wave JS UI MQTT Settings",
         "description": "Configure MQTT connection to your Z-Wave JS UI instance. The Node ID for your RFWC5 can be found in the Z-Wave JS UI control panel under your device details.",
@@ -75,6 +82,13 @@
         "description": "Select the indicator sensor or number entity for {device_name}.",
         "data": {
           "indicator_entity": "Indicator Sensor / Number Entity"
+        }
+      },
+      "basic_sensor": {
+        "title": "Select Basic Sensor",
+        "description": "Select the Basic sensor entity for this keypad. This entity reports button press values (10/20/30/40/50). If it appears disabled in HA, the integration will enable it automatically.",
+        "data": {
+          "basic_sensor": "Basic Sensor Entity"
         }
       },
       "mqtt": {

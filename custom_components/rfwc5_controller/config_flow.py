@@ -19,6 +19,7 @@ from .const import (
     ACTION_TYPE_STATEFUL_SCENE,
     ACTION_TYPE_TOGGLE,
     ACTION_TYPES,
+    CONF_BASIC_SENSOR,
     CONF_BUTTON_ACTION_ENTITY,
     CONF_BUTTON_ACTION_TYPE,
     CONF_BUTTON_LABEL,
@@ -80,6 +81,18 @@ def _get_indicator_entities(hass: HomeAssistant, device_id: str) -> dict[str, st
     return result
 
 
+def _get_basic_sensor_entities(hass: HomeAssistant, device_id: str) -> dict[str, str]:
+    """Return {entity_id: friendly_name} for sensor entities on a Z-Wave device (incl. disabled)."""
+    ent_reg = er.async_get(hass)
+    result: dict[str, str] = {}
+    for entry in ent_reg.entities.values():
+        if entry.device_id == device_id and entry.domain == "sensor":
+            friendly = entry.name or entry.original_name or entry.entity_id
+            disabled_tag = " [disabled]" if entry.disabled else ""
+            result[entry.entity_id] = f"{friendly}{disabled_tag} ({entry.entity_id})"
+    return result
+
+
 def _get_entities_for_action_type(
     hass: HomeAssistant, action_type: str
 ) -> dict[str, str]:
@@ -108,15 +121,16 @@ def _default_button_config(index: int) -> dict[str, Any]:
 class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """
     Multi-step config flow:
-      Step 1 – user:      Pick Z-Wave device + keypad name
-      Step 2 – indicator: Pick indicator entity (scoped to selected device)
-      Step 3 – mqtt:      Z-Wave JS UI MQTT settings + node ID
-      Step 4 – buttons:   Set labels + action types for all 5 buttons at once
-      Step 5 – entities:  Entity pickers, shown only for non-"none" buttons,
-                          filtered to the correct domain per action type
+      Step 1 – user:         Pick Z-Wave device + keypad name
+      Step 2 – indicator:    Pick indicator entity (scoped to selected device)
+      Step 3 – basic_sensor: Pick Basic CC sensor entity (reports button press values)
+      Step 4 – mqtt:         Z-Wave JS UI MQTT settings + node ID
+      Step 5 – buttons:      Set labels + action types for all 5 buttons at once
+      Step 6 – entities:     Entity pickers, shown only for non-"none" buttons,
+                             filtered to the correct domain per action type
     """
 
-    VERSION = 2
+    VERSION = 4
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
@@ -162,7 +176,7 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._data[CONF_BUTTONS] = [
                 _default_button_config(i) for i in range(NUM_BUTTONS)
             ]
-            return await self.async_step_mqtt()
+            return await self.async_step_basic_sensor()
 
         zwave_devices = _get_zwave_devices(self.hass)
         device_name = zwave_devices.get(device_id, device_id)
@@ -179,10 +193,35 @@ class RFWC5ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"device_name": device_name},
         )
 
+    async def async_step_basic_sensor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Step 3: Select the Basic CC sensor entity for button press detection."""
+        device_id = self._data[CONF_DEVICE_ID]
+        basic_entities = _get_basic_sensor_entities(self.hass, device_id)
+
+        if user_input is not None:
+            self._data[CONF_BASIC_SENSOR] = user_input.get(CONF_BASIC_SENSOR, "")
+            return await self.async_step_mqtt()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_BASIC_SENSOR, default=""): (
+                    vol.In(basic_entities) if basic_entities else str
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="basic_sensor",
+            data_schema=schema,
+            description_placeholders={},
+        )
+
     async def async_step_mqtt(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 3: Configure Z-Wave JS UI MQTT settings and RFWC5 node ID."""
+        """Step 4: Configure Z-Wave JS UI MQTT settings and RFWC5 node ID."""
         if user_input is not None:
             self._data[CONF_MQTT_PREFIX] = user_input[CONF_MQTT_PREFIX]
             self._data[CONF_MQTT_GATEWAY] = user_input[CONF_MQTT_GATEWAY]
@@ -336,7 +375,7 @@ class RFWC5OptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             self._data[CONF_ENTITY_ID] = user_input[CONF_ENTITY_ID]
-            return await self.async_step_mqtt()
+            return await self.async_step_basic_sensor()
 
         zwave_devices = _get_zwave_devices(self.hass)
         device_name = zwave_devices.get(device_id, device_id)
@@ -356,10 +395,36 @@ class RFWC5OptionsFlow(config_entries.OptionsFlow):
             description_placeholders={"device_name": device_name},
         )
 
+    async def async_step_basic_sensor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Step 3: Re-select the Basic CC sensor entity."""
+        device_id = self._data[CONF_DEVICE_ID]
+        basic_entities = _get_basic_sensor_entities(self.hass, device_id)
+
+        if user_input is not None:
+            self._data[CONF_BASIC_SENSOR] = user_input.get(CONF_BASIC_SENSOR, "")
+            return await self.async_step_mqtt()
+
+        current = self._data.get(CONF_BASIC_SENSOR, "")
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_BASIC_SENSOR, default=current): (
+                    vol.In(basic_entities) if basic_entities else str
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="basic_sensor",
+            data_schema=schema,
+            description_placeholders={},
+        )
+
     async def async_step_mqtt(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 3: Re-configure Z-Wave JS UI MQTT settings and RFWC5 node ID."""
+        """Step 4: Re-configure Z-Wave JS UI MQTT settings and RFWC5 node ID."""
         if user_input is not None:
             self._data[CONF_MQTT_PREFIX] = user_input[CONF_MQTT_PREFIX]
             self._data[CONF_MQTT_GATEWAY] = user_input[CONF_MQTT_GATEWAY]

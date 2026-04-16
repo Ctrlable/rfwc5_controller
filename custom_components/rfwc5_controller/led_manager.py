@@ -66,6 +66,8 @@ class RFWC5LedManager:
 
         # Internal LED state – index 0-4 corresponds to buttons 1-5
         self._leds: list[bool] = [False] * NUM_BUTTONS
+        # LED state snapshot from before the last refresh (used to detect button releases)
+        self._previous_leds: list[bool] = [False] * NUM_BUTTONS
 
         # Listeners registered by switch entities so they can update HA state
         self._state_listeners: list[Callable[[int, bool], None]] = []
@@ -103,6 +105,14 @@ class RFWC5LedManager:
     def get_button_state(self, button_index: int) -> bool:
         """Return current LED state (0-based index)."""
         return self._leds[button_index]
+
+    def get_previous_leds(self) -> list[bool]:
+        """Return LED state snapshot from before the last refresh."""
+        return self._previous_leds[:]
+
+    async def async_refresh_and_read_indicator(self) -> None:
+        """Public wrapper: refresh the indicator from the device and update LED state."""
+        await self._async_refresh_and_read()
 
     def register_state_listener(self, listener: Callable[[int, bool], None]) -> None:
         """Register a callback(button_index, new_state) for state-push updates."""
@@ -194,6 +204,7 @@ class RFWC5LedManager:
             await asyncio.sleep(REFRESH_SETTLE_S)
             raw = self._read_indicator_from_ha()
             if raw is not None:
+                self._previous_leds = self._leds[:]
                 self._leds = self._decode(raw)
 
     async def _async_write_now(self) -> None:
