@@ -56,13 +56,16 @@ class MQTTProvisioner:
         self.hass = hass
         self._entry = entry
 
-        data = entry.data
-        self._node_id: int | None = data.get(CONF_NODE_ID)
-        self._controller_node_id: int = data.get(
+        # Options (from reconfigure) take precedence over original data
+        def _cfg(key, default=None):
+            return entry.options.get(key) or entry.data.get(key, default)
+
+        self._node_id: int | None = _cfg(CONF_NODE_ID)
+        self._controller_node_id: int = _cfg(
             CONF_CONTROLLER_NODE_ID, DEFAULT_CONTROLLER_NODE_ID
         )
-        self._prefix: str = data.get(CONF_MQTT_PREFIX, DEFAULT_MQTT_PREFIX)
-        self._gateway: str = data.get(CONF_MQTT_GATEWAY, DEFAULT_MQTT_GATEWAY)
+        self._prefix: str = _cfg(CONF_MQTT_PREFIX, DEFAULT_MQTT_PREFIX)
+        self._gateway: str = _cfg(CONF_MQTT_GATEWAY, DEFAULT_MQTT_GATEWAY)
 
     # ------------------------------------------------------------------
     # Public

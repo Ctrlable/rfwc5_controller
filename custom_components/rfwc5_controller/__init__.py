@@ -135,13 +135,27 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
+async def _async_reload_on_update(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Reload the integration when the config entry is updated."""
+    _LOGGER.info(
+        "RFWC5 %s config updated — reloading integration", entry.entry_id
+    )
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up RFWC5 Controller from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    device_id: str = entry.data[CONF_DEVICE_ID]
-    indicator_entity: str = entry.data[CONF_ENTITY_ID]
-    buttons_cfg: list[dict] = entry.data[CONF_BUTTONS]
+    def _get_config(key: str, default=None):
+        """Read from options first (reconfigure), fall back to original data."""
+        return entry.options.get(key) or entry.data.get(key, default)
+
+    device_id: str = _get_config(CONF_DEVICE_ID, "")
+    indicator_entity: str = _get_config(CONF_ENTITY_ID, "")
+    buttons_cfg: list[dict] = _get_config(CONF_BUTTONS, [])
 
     # Store entry-level runtime data
     hass.data[DOMAIN][entry.entry_id] = {
@@ -197,7 +211,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ---------------------------------------------------------------
     # Track Basic CC sensor → detect button presses / releases
     # ---------------------------------------------------------------
-    basic_sensor: str = entry.data.get(CONF_BASIC_SENSOR, "")
+    basic_sensor: str = _get_config(CONF_BASIC_SENSOR, "")
 
     if basic_sensor:
         # Auto-enable the entity if HA has it disabled
@@ -211,7 +225,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async def _handle_basic_value(value: int) -> None:
             """React to a Basic CC value reported by the keypad."""
-            group_levels = entry.data.get("group_levels", DEFAULT_GROUP_LEVELS)
+            group_levels = _get_config("group_levels", DEFAULT_GROUP_LEVELS)
             btn_cfg = hass.data[DOMAIN][entry.entry_id]["buttons"]
 
             if value == 0:
@@ -328,6 +342,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Forward to switch platform
     # ---------------------------------------------------------------
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Reload integration automatically whenever the user saves new options
+    entry.async_on_unload(
+        entry.add_update_listener(_async_reload_on_update)
+    )
 
     return True
 
